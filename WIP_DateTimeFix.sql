@@ -14,6 +14,19 @@ CREATE TABLE #Data
 	NewTimeValue VARCHAR(20)
 )
 
+CREATE TABLE #Fields
+(
+	DateTimeField VARCHAR()
+	TimeField VARCHAR()
+)
+
+INSERT INTO #FIelds
+VALUES	('CreatedDate_Time','CreateTime'),
+		('LastModifiedDate_Time','LastModifiedTime'),
+		('SentDate_Time', 'SentTime'),
+		('ReceivedDate_Time','ReceivedTime')
+SELECT LEN(LastModifiedDate_Time)
+
 INSERT INTO #Data (ArtifactID, ControlNumber, DateTimeFieldName, OldDateTimeValue, OldTimeValue)
 SELECT
 	d.ArtifactID, d.ControlNumber, 'SentDate_Time', d.SentDate_Time, d.SentTime

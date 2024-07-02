@@ -1,0 +1,146 @@
+<script><name>ParentID/ChildID Production Update</name><description>This Relativity script updates ParentID/ChildID fields for the selected production.</description><category>Production Updates</category><key>B222451F-F5C0-499D-90F3-B34B42AD820B</key><input><sql id="ProductionArtID" name="Production:">
+			SELECT 
+				DISPLAY = p.Name, ID =p.ArtifactID
+			FROM EDDSDBO.Production p (NOLOCK)
+			ORDER BY 1
+		</sql><sql id="BegBatesField" name="Select Production BegProd Field:">
+			SELECT 
+				Display=F.[DisplayName], ID=AVF.[ColumnName]
+			FROM EDDSDBO.[Field] F (NOLOCK) 
+				JOIN EDDSDBO.[ArtifactViewField] AVF ON F.[ArtifactViewFieldID] = AVF.[ArtifactViewFieldID] 
+			WHERE AVF.ColumnName LIKE '%BeginBates%' AND AVF.ColumnName NOT LIKE '%attachment%' AND F.FieldCategoryID = 0 AND F.FieldArtifactTypeID = 10
+			ORDER BY 1
+		</sql><sql id="EndBatesField" name="Select Production EndProd Field:">
+			SELECT 
+				Display=F.[DisplayName], ID=AVF.[ColumnName]
+			FROM EDDSDBO.[Field] F (NOLOCK) 
+				JOIN EDDSDBO.[ArtifactViewField] AVF ON F.[ArtifactViewFieldID] = AVF.[ArtifactViewFieldID] 
+			WHERE AVF.ColumnName LIKE '%EndBates%' AND AVF.ColumnName NOT LIKE '%attachment%' AND F.FieldCategoryID = 0 AND F.FieldArtifactTypeID = 10
+			ORDER BY 1
+		</sql><sql id="BegBatesAttachmentField" name="Select Production BegBatesAttachment Field:">
+			SELECT 
+				Display=F.[DisplayName], ID=AVF.[ColumnName]
+			FROM EDDSDBO.[Field] F (NOLOCK) 
+				JOIN EDDSDBO.[ArtifactViewField] AVF ON F.[ArtifactViewFieldID] = AVF.[ArtifactViewFieldID] 
+			WHERE AVF.ColumnName LIKE '%BeginBates%' AND AVF.ColumnName LIKE '%attachment%' AND F.FieldCategoryID = 0 AND F.FieldArtifactTypeID = 10
+			ORDER BY 1
+		</sql><sql id="EndBatesAttachmentField" name="Select Production EndBatesAttachment Field:">
+			SELECT 
+				Display=F.[DisplayName], ID=AVF.[ColumnName]
+			FROM EDDSDBO.[Field] F (NOLOCK) 
+				JOIN EDDSDBO.[ArtifactViewField] AVF ON F.[ArtifactViewFieldID] = AVF.[ArtifactViewFieldID] 
+			WHERE AVF.ColumnName LIKE '%EndBates%' AND AVF.ColumnName LIKE '%attachment%' AND F.FieldCategoryID = 0 AND F.FieldArtifactTypeID = 10
+			ORDER BY 1
+		</sql><sql id="ParentBatesField" name="Select Production Parent Bates Field:">
+			SELECT Display=F.[DisplayName], ID=AVF.[ColumnName]
+			FROM eddsdbo.[Field] F (NOLOCK) 
+				INNER JOIN eddsdbo.[ArtifactViewField] AVF ON F.[ArtifactViewFieldID] = AVF.[ArtifactViewFieldID] 
+			WHERE AVF.ColumnName LIKE '%Production%' AND AVF.ColumnName LIKE '%Parent%' AND AVF.ColumnName LIKE '%bates%' AND F.FieldCategoryID = 0 AND F.FieldArtifactTypeID = 10
+			ORDER BY 1
+		</sql><sql id="ChildBatesField" name="Select Production Child Bates Field:">
+			SELECT Display=F.[DisplayName], ID=AVF.[ColumnName]
+			FROM eddsdbo.[Field] F (NOLOCK) 
+				INNER JOIN eddsdbo.[ArtifactViewField] AVF ON F.[ArtifactViewFieldID] = AVF.[ArtifactViewFieldID] 
+			WHERE AVF.ColumnName LIKE '%Production%' AND AVF.ColumnName LIKE '%Child%' AND AVF.ColumnName LIKE '%bates%' AND F.FieldCategoryID = 0 AND F.FieldArtifactTypeID = 10
+			ORDER BY 1
+		</sql></input><action returns="table" timeout="600">
+
+DECLARE @ProductionArtifactID INT;
+SET @ProductionArtifactID = #ProductionArtID#
+
+IF OBJECT_ID('tempdb..#ArtID') IS NOT NULL
+	DROP TABLE #ArtID
+
+CREATE TABLE #ArID (ArtifactID INT PRIMARY KEY)
+
+DECLARE @SQL NVARCHAR(MAX);
+SET @SQL=N'
+		INSERT INTO #ArID 
+		SELECT DISTINCT 
+			pdf.DocumentArtifactID 
+		FROM eddsdbo.ProductionDocumentFile_' + CONVERT(NVARCHAR,@ProductionArtifactID) + ' pdf (NOLOCK)'
+EXECUTE sp_executesql @sql;
+
+CREATE TABLE #ToUpdate 
+	(ArtifactID INT PRIMARY KEY, BeginBates NVARCHAR(50), EndBates NVARCHAR(50), BeginBatesAttachment NVARCHAR(50),
+	EndBatesAttachment NVARCHAR(50), Parent_Bates NVARCHAR(MAX), Child_Bates NVARCHAR(MAX), ParentAttach NVARCHAR(1))
+
+INSERT INTO #ToUpdate 
+		(ArtifactID, BeginBates, EndBates, BeginBatesAttachment, EndBatesAttachment, Parent_Bates, Child_Bates, ParentAttach)
+SELECT
+	d.ArtifactID,d.#BegBatesField#,d.#EndBatesField#,d.#BegBatesAttachmentField#,d.#EndBatesAttachmentField#,d.#ParentBatesField#,d.#ChildBatesField#,'A' as ParentAttach
+FROM EDDSDBO.Document d (NOLOCK)
+JOIN #ArID x
+ON x.ArtifactID = d.ArtifactID
+
+--Updates
+
+--Update document table
+UPDATE d
+SET 	d.#ParentBatesField# = NULL,
+	d.#ChildBatesField# = NULL
+FROM EDDSDBO.Document d WITH (ROWLOCK)
+JOIN #ToUpdate x
+ON x.ArtifactID = d.ArtifactID
+
+--Update Parent Docs
+UPDATE #ToUpdate
+	SET ParentAttach = 'P'
+WHERE BeginBates = BeginBatesAttachment
+
+--Update ChildInfo
+UPDATE x
+	SET x.Child_Bates = x2.ChildrenList
+FROM #ToUpdate x
+JOIN 
+	(
+	SELECT DISTINCT 
+		t1.BeginBatesAttachment, 
+			STUFF(( SELECT ';' + t.BeginBates 
+			FROM #ToUpdate t
+			WHERE t.BeginBatesAttachment = t1.BeginBatesAttachment
+			AND ParentAttach = 'A'
+			ORDER BY t.BeginBates 
+			FOR XML PATH ('')),1,1,'') AS ChildrenList
+	FROM #ToUpdate t1
+	) x2
+ON  x2.BeginBatesAttachment = x.BeginBatesAttachment
+
+--Update Parent Bates
+UPDATE x
+	SET x.Parent_Bates = x.BeginBatesAttachment
+FROM #ToUpdate x
+WHERE 
+	x.Child_Bates IS NOT NULL and x.ParentAttach = 'A'
+
+--Update Child Bates
+UPDATE x
+	SET x.Child_Bates = NULL
+FROM #ToUpdate x
+WHERE x.ParentAttach = 'A' AND x.Child_Bates IS NOT NULL
+
+/*
+--Update
+UPDATE x
+	SET x.Parents_Bates = NULL
+FROM #ToUpdate x
+WHERE x.ParentAttach = 'P' AND x.Child_Bates IS NOT NULL
+*/
+
+--Update Document Table 
+UPDATE d
+SET 	d.#ParentBatesField# = x.Parent_Bates,
+	d.#ChildBatesField# = x.Child_Bates
+FROM EDDSDBO.Document d WITH (ROWLOCK)
+JOIN #ToUpdate x
+ON x.ArtifactID = d.ArtifactID
+
+SELECT 'Script is complete'
+/* 
+SELECT 
+	d.ArtifactID,d.#BegBatesField#,d.#EndBatesField#,d.#BegBatesAttachmentField#,d.#EndBatesAttachmentField#,d.#ParentBatesField#,d.#ChildBatesField#,'A' as ParentAttach
+FROM eddsdbo.Document d WITH (NOLOCK) 
+JOIN #ArID x 
+ON x.DocumentArtifactID = d.ArtifactID
+*/ 
+</action></script>
