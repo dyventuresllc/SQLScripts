@@ -1,0 +1,85 @@
+<script>
+	<name>Update Primary Date Time/Sort Date Time</name>
+	<description>script will update primary date/time and sort date/time based on SentDateTime, ReceivedDateTime, LastModifiedDateTime, CreatedDateTime</description>
+	<category/>
+	<input>
+	<search id="searchId" name="Saved Search:" required="True" />
+	</input><action returns="table" timeout="600">
+
+--4F0A3CE6-6B12-41FC-BC71-F52347176389
+--assigned GUID for script
+
+IF OBJECT_ID('tempdb..#ArtID') IS NOT NULL
+DROP TABLE #ArtID
+
+CREATE TABLE #ArtID(ArtifactID INT PRIMARY KEY)
+
+INSERT INTO #ArtID(ArtifactID)
+SELECT DISTINCT Document.ArtifactID
+#searchId#
+
+DECLARE @ScriptGuid NVARCHAR(36) = '3B89E6A5-3037-495C-A735-2976604C2ED8';
+DECLARE @SourceDataBackupTable NVARCHAR(MAX);
+DECLARE @SQL NVARCHAR(2000);
+    
+SET @SourceDataBackupTable =  (SELECT CONCAT(@ScriptGuid,'_',FORMAT(GETDATE(), 'yyyy'), FORMAT (GETDATE(), 'MM'),FORMAT (GETDATE(), 'dd'),FORMAT (GETDATE(), 'hh'),FORMAT (GETDATE(), 'mm'),FORMAT (GETDATE(), 'ss')));
+
+IF (NOT EXISTS (SELECT * FROM sys.schemas WHERE name = 'DATABACKUP')) 
+BEGIN
+    EXEC ('CREATE SCHEMA [DATABACKUP]')
+	--EXEC ('CREATE SCHEMA [DATABACKUP] AUTHORIZATION [EDDSDBO]')
+END
+
+IF OBJECT_ID ('dbo.TempData') IS NOT NULL
+DROP TABLE dbo.TempData
+
+IF OBJECT_ID ('dbo.TempNFD') IS NOT NULL
+DROP TABLE dbo.TempNFD
+
+;WITH CTE (DocumentArtifactID, ControlNumber, FamilyGroup, UpdateDate, PrimaryDate, SortDate)
+AS 
+(				
+	SELECT
+		d.ArtifactID, 
+		d.controlnumber, 
+		COALESCE(NULLIF(FamilyGroup,''),ControlNumber), 
+		COALESCE(d.SentDateTime, d.ReceivedDateTime, d.LastModifiedDateTime, d.CreatedDateTime) as FINAL_DT, d.PrimaryDateTime, d.SortDateTime
+	FROM EDDSDBO.Document d WITH (NOLOCK)
+	JOIN #ArtID x ON x.ArtifactID = d.ArtifactID
+)	
+
+SELECT * 
+INTO dbo.TempData
+FROM CTE
+
+CREATE INDEX _tmp ON dbo.TempData (DocumentArtifactID, FamilyGroup)
+
+SET @SQL = N'SELECT DocumentArtifactID, PrimaryDate, SortDate INTO DATABACKUP.[' + @SourceDataBackupTable + '] FROM dbo.TempData';
+EXECUTE sp_sqlexec @SQL
+			
+SELECT 
+	DocumentArtifactID, ControlNumber, FamilyGroup, UpdateDate  
+INTO dbo.TempNFD --NewFamilyData
+FROM dbo.TempData 
+WHERE 
+    UpdateDate IS NOT NULL 
+AND ControlNumber = FamilyGroup
+
+UPDATE d
+SET d.PrimaryDateTime = td.UpdateDate
+FROM eddsdbo.Document d WITH (ROWLOCK)
+JOIN dbo.TempData td on td.DocumentArtifactID = d.ArtifactID
+WHERE 
+    d.PrimaryDateTime IS NULL
+
+UPDATE d
+SET d.SortDateTime = nfd.UpdateDate
+FROM eddsdbo.document d WITH (ROWLOCK)
+JOIN dbo.TempData td on td.DocumentArtifactID = d.ArtifactID
+JOIN dbo.TempNFD nfd ON nfd.FamilyGroup = td.FamilyGroup
+WHERE   
+    d.SortDateTime IS NULL
+
+SELECT 'Update is complete'
+
+</action></script>
